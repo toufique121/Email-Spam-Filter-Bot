@@ -31,8 +31,6 @@ WHITELIST_DOMAINS = [
     "codeforces.com",  # <--- এটা যোগ করুন
     "medium.com"       # <--- এটা যোগ করুন
 ]
-    
-]
 
 # সাবজেক্টে এই শব্দগুলো থাকলেও সেভ করা হবে (যেমন: Submission, Code, Alert)
 SAFE_KEYWORDS = ["submission", "verification code", "security alert", "single-use code", "deadline"]
@@ -139,4 +137,5 @@ if st.button("🚀 মেইল চেক করুন"):
 
         except Exception as e:
             status_area.error(f"লগইন সমস্যা: {e}")
+
 

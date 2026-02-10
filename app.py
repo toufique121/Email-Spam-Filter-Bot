@@ -4,82 +4,86 @@ import email
 from email.header import decode_header
 import pickle
 import pandas as pd
+import plotly.express as px
 import time
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.naive_bayes import MultinomialNB
 
-# --- ১. পেজ এবং ফাইল কনফিগারেশন ---
-st.set_page_config(page_title="Smart Spam Cleaner", page_icon="🧠", layout="wide")
+# --- ১. পেজ কনফিগারেশন ---
+st.set_page_config(
+    page_title="SpamGuard AI",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ফাইলের নাম (আপনার গিটহাব অনুযায়ী)
-DATASET_FILE = 'email_test.csv'  # আপনার ডাটাসেট ফাইল
-MODEL_FILE = 'spam_model.pkl'    # আপনার মডেল ফাইল (GitHub এ যা আছে)
-VECTORIZER_FILE = 'vectorizer.pkl'
+# কাস্টম CSS
+st.markdown("""
+<style>
+    .stButton>button {
+        width: 100%;
+        border-radius: 5px;
+        height: 3em;
+    }
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # --- ২. সেশন স্টেট ---
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'emails_df' not in st.session_state: st.session_state.emails_df = pd.DataFrame()
+if 'emails_df' not in st.session_state:
+    st.session_state.emails_df = pd.DataFrame()
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'user_email' not in st.session_state:
+    st.session_state.user_email = ""
+if 'user_password' not in st.session_state:
+    st.session_state.user_password = ""
 
-# --- ৩. মডেল লোড ---
+# --- ৩. হেল্পার ফাংশন (আপডেটেড লজিক) ---
+
+# 🔥 ফিক্সড হোয়াইটলিস্ট লজিক (আরও কড়া নিয়ম)
+def is_important_email(subject, sender):
+    # ১. খুব স্পেসিফিক কিওয়ার্ড (সাধারণ শব্দ বাদ দিয়েছি)
+    safe_keywords = [
+        "interview schedule", "appointment letter", "class test", "midterm", "final exam", 
+        "cgpa", "grade sheet", "varsity notice", "bkash verification", "nagad otp", 
+        "security code", "password reset", "google alert"
+    ]
+    
+    # ২. বিশ্বস্ত ডোমেইন (Trusted Domains)
+    safe_senders = [
+        ".edu", ".gov", ".ac.bd", # শিক্ষা ও সরকারি
+        "google.com", "linkedin.com", "github.com", "gitlab.com", "kaggle.com", 
+        "streamlit.io", "upwork.com", "fiverr.com", "coursera.org", "udacity.com"
+    ]
+    
+    sender = sender.lower()
+    subject = subject.lower()
+
+    # আগে সেন্ডার চেক
+    for s in safe_senders:
+        if s in sender: return True, f"Trusted Sender ({s})"
+    
+    # তারপর সাবজেক্ট চেক
+    for w in safe_keywords:
+        if w in subject: return True, f"Important Keyword: {w}"
+        
+    return False, "Potential Spam"
+
+# মডেল লোড
 @st.cache_resource
-def load_resources():
+def load_ai_model():
     try:
-        model = pickle.load(open(MODEL_FILE, 'rb'))
-        vectorizer = pickle.load(open(VECTORIZER_FILE, 'rb'))
+        model = pickle.load(open('model.pkl', 'rb'))
+        vectorizer = pickle.load(open('vectorizer.pkl', 'rb'))
         return model, vectorizer
     except:
         return None, None
 
-model, vectorizer = load_resources()
-
-# --- ৪. 🔥 রি-ট্রেনিং ফাংশন (সবচেয়ে গুরুত্বপূর্ণ অংশ) ---
-def add_data_and_retrain(new_text, label):
-    """
-    new_text: মেইলের সাবজেক্ট
-    label: 1 (Spam) or 0 (Safe)
-    """
-    try:
-        # ১. নতুন ডাটা তৈরি
-        # আপনার CSV ফাইলে কলামের নাম যদি 'text' আর 'spam' হয়:
-        new_row = pd.DataFrame({'text': [new_text], 'spam': [label]})
-        
-        # ২. পুরনো CSV ফাইলে নতুন ডাটা যোগ করা (Append)
-        # যদি ফাইল না থাকে, নতুন বানাবে। থাকলে শেষে যোগ করবে।
-        try:
-            pd.read_csv(DATASET_FILE) # চেক করছি ফাইল আছে কিনা
-            new_row.to_csv(DATASET_FILE, mode='a', header=False, index=False)
-        except FileNotFoundError:
-            # ফাইল না থাকলে নতুন করে বানাবে
-            new_row.to_csv(DATASET_FILE, index=False)
-        
-        # ৩. রি-ট্রেনিং (পুরো ফাইল আবার পড়ে মডেল আপডেট করা)
-        df = pd.read_csv(DATASET_FILE)
-        
-        # এখানে নিশ্চিত হতে হবে কলামের নাম ঠিক আছে
-        # ধরে নিচ্ছি কলামের নাম 'text' এবং 'spam'
-        # যদি আপনার ফাইলে 'Message'/'Category' থাকে, নিচের লাইন দুটি আনকমেন্ট করে ঠিক করে নিন:
-        # x_data = df['Message']
-        # y_data = df['Category'].apply(lambda x: 1 if x=='spam' else 0)
-        
-        x_data = df['text']
-        y_data = df['spam'] # 1=Spam, 0=Safe
-
-        # ভেক্টরাইজার আপডেট
-        v = CountVectorizer()
-        X_train = v.fit_transform(x_data)
-        
-        # মডেল আপডেট
-        new_model = MultinomialNB()
-        new_model.fit(X_train, y_data)
-        
-        # ৪. নতুন মডেল সেভ করা
-        pickle.dump(new_model, open(MODEL_FILE, 'wb'))
-        pickle.dump(v, open(VECTORIZER_FILE, 'wb'))
-        
-        return True
-    except Exception as e:
-        st.error(f"Retraining Error: {e}. (Check CSV column names!)")
-        return False
+model, vectorizer = load_ai_model()
 
 # কানেকশন ফাংশন
 def connect_to_gmail(user, pwd):
@@ -87,109 +91,181 @@ def connect_to_gmail(user, pwd):
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(user, pwd)
         return mail
-    except: return None
+    except Exception as e:
+        return None
 
-# --- ৫. সাইডবার ---
+# --- ৪. সাইডবার ---
 with st.sidebar:
-    st.title("🧠 Self-Learning Mode")
+    st.title("🛡️ SpamGuard AI")
+    st.markdown("---")
     
     if not st.session_state.logged_in:
-        user_email = st.text_input("Email")
+        user_email = st.text_input("Gmail Address")
         user_password = st.text_input("App Password", type="password")
-        if st.button("Login"):
-            if connect_to_gmail(user_email, user_password):
-                st.session_state.logged_in = True
-                st.session_state.user_email = user_email
-                st.session_state.user_password = user_password
-                st.rerun()
+        if st.button("🔐 Login"):
+            if user_email and user_password:
+                conn = connect_to_gmail(user_email, user_password)
+                if conn:
+                    st.session_state.logged_in = True
+                    st.session_state.user_email = user_email
+                    st.session_state.user_password = user_password
+                    conn.logout()
+                    st.success("Login Successful!")
+                    st.rerun()
+                else:
+                    st.error("Login Failed! Check credentials.")
     else:
-        st.success("Connected ✅")
-        folder = st.selectbox("Select Folder", ["INBOX", "[Gmail]/Spam"])
-        limit = st.slider("Scan Limit", 10, 100, 30)
+        st.success(f"User: {st.session_state.user_email}")
         
-        if st.button("🔄 Scan Again"):
+        st.subheader("⚙️ Settings")
+        folder = st.selectbox("Target Folder", ["INBOX", "[Gmail]/Spam"])
+        limit = st.slider("Scan Emails", 10, 200, 50)
+        
+        if st.button("🔄 New Scan"):
+            st.session_state.emails_df = pd.DataFrame()
+            st.rerun()
+            
+        if st.button("🚪 Logout"):
+            st.session_state.logged_in = False
             st.session_state.emails_df = pd.DataFrame()
             st.rerun()
 
-# --- ৬. মেইন অ্যাপ ---
+# --- ৫. ড্যাশবোর্ড ---
+
 if st.session_state.logged_in:
-    st.header(f"Scanning: {folder}")
+    st.header("📊 Inbox Health Dashboard")
     
-    # স্ক্যানিং লজিক
+    # স্ক্যানিং প্রসেস
     if st.session_state.emails_df.empty:
-        with st.spinner("Analyzing emails..."):
+        with st.spinner("🤖 AI is analyzing your emails..."):
             mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
-            mail.select(folder)
-            _, msgs = mail.uid('search', None, "ALL")
-            if msgs[0]:
-                uids = msgs[0].split()[-limit:]
-                data = []
-                for uid in reversed(uids):
-                    try:
-                        _, data_msg = mail.uid('fetch', uid, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                        msg = email.message_from_bytes(data_msg[0][1])
-                        subject = decode_header(msg["Subject"])[0][0]
-                        if isinstance(subject, bytes): subject = subject.decode()
-                        sender = msg.get("From", "")
-                        
-                        # AI Prediction
-                        category = "Unknown"
-                        if model:
-                            vec = vectorizer.transform([subject])
-                            pred = model.predict(vec)[0]
-                            category = "Spam" if pred == 1 else "Safe"
-                        
-                        data.append({"UID": uid, "Subject": subject, "Sender": sender, "Category": category})
-                    except: continue
-                st.session_state.emails_df = pd.DataFrame(data)
-    
+            if mail:
+                mail.select(folder)
+                status, messages = mail.uid('search', None, "ALL")
+                
+                if messages[0]:
+                    uids = messages[0].split()[-limit:]
+                    data = []
+                    
+                    for uid in reversed(uids):
+                        try:
+                            res, msg_data = mail.uid('fetch', uid, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                            msg = email.message_from_bytes(msg_data[0][1])
+                            
+                            subject = "No Subject"
+                            if msg["Subject"]:
+                                decoded = decode_header(msg["Subject"])[0]
+                                subject = decoded[0].decode(decoded[1] or "utf-8") if isinstance(decoded[0], bytes) else str(decoded[0])
+                            
+                            sender = msg.get("From", "")
+                            
+                            # --- লজিক (Logic) ---
+                            category = "Spam"
+                            reason = "Unknown"
+                            
+                            # ১. রুলস চেক
+                            is_safe, rule_reason = is_important_email(subject, sender)
+                            
+                            if is_safe:
+                                category = "Safe"
+                                reason = rule_reason
+                            
+                            # ২. AI চেক (যদি রুলসে ধরা না পড়ে)
+                            elif model:
+                                try:
+                                    vec = vectorizer.transform([subject])
+                                    prediction = model.predict(vec)[0]
+                                    
+                                    if prediction == 0: # মডেল বলছে সেফ
+                                        category = "Safe"
+                                        reason = "AI Model Cleared"
+                                    else: # মডেল বলছে স্প্যাম
+                                        category = "Spam"
+                                        reason = "AI Detected Spam Content"
+                                except: 
+                                    pass
+
+                            # ইনবক্সের জন্য একটু ছাড় দেওয়া
+                            if folder == "INBOX" and category == "Spam":
+                                # এখানে চাইলে আরও লজিক দেওয়া যায়
+                                pass
+
+                            data.append({
+                                "UID": uid.decode('utf-8'),
+                                "Subject": subject,
+                                "Sender": sender,
+                                "Category": category,
+                                "Reason": reason,
+                                "Delete": True if category == "Spam" else False
+                            })
+                        except: continue
+                    
+                    st.session_state.emails_df = pd.DataFrame(data)
+                    mail.logout()
+                else:
+                    st.info("Folder is empty!")
+                    mail.logout()
+
     # রেজাল্ট ডিসপ্লে
     if not st.session_state.emails_df.empty:
         df = st.session_state.emails_df
         
-        for index, row in df.iterrows():
-            with st.container():
-                c1, c2, c3, c4 = st.columns([1, 4, 1.5, 1])
-                
-                # স্ট্যাটাস কালার
-                color = "red" if row['Category'] == "Spam" else "green"
-                c1.markdown(f":{color}[{row['Category']}]")
-                c2.write(f"**{row['Subject']}**\n\n<span style='color:gray; font-size:0.8em'>{row['Sender']}</span>", unsafe_allow_html=True)
-                
-                # 🔥 TEACHING BUTTONS (মডেলকে শেখানো)
-                
-                # যদি মডেল ভুল করে Spam বলে, আপনি বলবেন "Mark Safe"
-                if row['Category'] == "Spam":
-                    if c3.button("✅ Mark Safe & Train", key=f"safe_{row['UID']}"):
-                        with st.spinner("Updating dataset & Retraining model..."):
-                            # 0 = Safe
-                            if add_data_and_retrain(row['Subject'], 0):
-                                st.toast("Dataset Updated! Model Retrained successfully.", icon="🎉")
-                                time.sleep(1)
-                                st.rerun()
-                
-                # যদি মডেল ভুল করে Safe বলে, আপনি বলবেন "Mark Spam"
-                else:
-                    if c3.button("🚫 Mark Spam & Train", key=f"spam_{row['UID']}"):
-                        with st.spinner("Updating dataset & Retraining model..."):
-                            # 1 = Spam
-                            if add_data_and_retrain(row['Subject'], 1):
-                                st.toast("Dataset Updated! Model Retrained successfully.", icon="🤖")
-                                time.sleep(1)
-                                st.rerun()
-
-                # ডিলিট বাটন
-                if row['Category'] == "Spam":
-                    if c4.button("🗑️ Delete", key=f"del_{row['UID']}"):
+        # মেট্রিক্স
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Scanned", len(df))
+        c2.metric("Safe", len(df[df['Category']=='Safe']), delta="Keep")
+        c3.metric("Spam", len(df[df['Category']=='Spam']), delta="-Delete", delta_color="inverse")
+        
+        st.divider()
+        
+        # অ্যাকশন ট্যাব
+        tab1, tab2 = st.tabs(["⚡ Clean Up", "📋 Full List"])
+        
+        with tab1:
+            st.subheader("Review Spam Emails")
+            
+            # এডিটর (UID হাইড করা আছে)
+            edited_df = st.data_editor(
+                df,
+                column_config={
+                    "UID": None, 
+                    "Delete": st.column_config.CheckboxColumn("Mark for Delete", default=False),
+                    "Category": st.column_config.TextColumn("Status", width="small"),
+                    "Subject": st.column_config.TextColumn("Subject", width="large"),
+                },
+                disabled=["Category", "Subject", "Sender", "Reason", "UID"],
+                hide_index=True,
+                use_container_width=True,
+                height=500
+            )
+            
+            to_delete = edited_df[edited_df['Delete'] == True]
+            count = len(to_delete)
+            
+            if st.button(f"🗑️ Delete {count} Emails", type="primary", disabled=(count==0)):
+                with st.spinner("Deleting..."):
+                    try:
                         mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
                         mail.select(folder)
-                        mail.uid('STORE', row['UID'], '+FLAGS', '\\Deleted')
+                        
+                        # UID লিস্ট নেওয়া
+                        uids_list = to_delete['UID'].tolist()
+                        batch_ids = ','.join(uids_list).encode('utf-8')
+                        
+                        # ডিলিট কমান্ড
+                        mail.uid('STORE', batch_ids, '+FLAGS', '\\Deleted')
                         mail.expunge()
-                        st.toast("Email Deleted!")
+                        mail.logout()
+                        
+                        st.toast(f"Boom! {count} emails deleted.", icon="💥")
                         time.sleep(1)
+                        st.session_state.emails_df = pd.DataFrame()
                         st.rerun()
-                
-                st.divider()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+        with tab2:
+            st.dataframe(df)
 
 else:
-    st.warning("Please Login from the sidebar.")
+    st.info("👈 Please login from the sidebar.")

@@ -54,36 +54,32 @@ def process_emails(username, password):
         # ==========================================
         # 🔥 সুপার স্ট্রং হোয়াইটলিস্ট (সব কীওয়ার্ড)
         # ==========================================
+       # ১. শব্দ (Keywords) - সাবজেক্টে এগুলো থাকলেই সেফ
         whitelist_keywords = [
-            # ভার্সিটি ও পড়াশোনা
-            "class", "exam", "quiz", "assignment", "marks", "result", "grade", 
+            # ভার্সিটি ও পড়াশোনা
+            "class test", "exam", "quiz", "assignment", "marks", " cgpa ", "final result", # 'grade' বাদ দিয়েছি বা স্পেসিফিক করেছি
             "university", "varsity", "routine", "schedule", "notice", "teacher", 
-            "professor", "lecture", "student", "portal", "fee", "admission",
+            "professor", "lecture", "student", "portal", "admission",
             
-            # চাকরি ও ক্যারিয়ার
-            "interview", "offer", "job", "hiring", "application", "recruit", 
-            "resume", "cv", "selection", "shortlist", "appointment", "meeting", 
-            "linkedin", "indeed", "glassdoor", "upwork", "fiverr",
+            # চাকরি ও ক্যারিয়ার
+            "interview", "job offer", "hiring", "application", "recruit", 
+            "resume", "cv", "shortlist", "appointment", "meeting", 
             
             # টাকা ও ব্যাংক (Finance)
-            "bank", "statement", "transaction", "payment", "bill", "invoice", 
+            "bank", "statement", "transaction", "payment", "invoice", 
             "receipt", "otp", "verification", "code", "bkash", "nagad", "rocket",
             
-            # কেনাকাটা ও ডেলিভারি
-            "order", "placed", "shipped", "delivery", "courier", "daraz", "amazon", 
-            "tracking", "package", "gift",
-            
-            # একাউন্ট ও সিকিউরিটি
-            "password", "reset", "login", "security", "alert", "confirm", "verify",
-            "google", "facebook", "microsoft"
+            # অন্যান্য
+            "delivery", "order", "reset password", "security alert"
         ]
 
+        # ২. ডোমেইন (Senders) - এদের মেইল কখনোই ডিলিট হবে না
         whitelist_senders = [
             ".edu", ".ac.bd", ".gov", ".org", 
             "google.com", "linkedin.com", "facebook.com", "udacity.com",
-            "coursera.org", "medium.com", "zoom.us", "microsoft.com"
+            "coursera.org", "medium.com", "zoom.us", "microsoft.com",
+            "streamlit.io", "github.com", "kaggle.com"  # <--- এইগুলো নতুন যোগ করুন
         ]
-
         for i, e_id in enumerate(mail_ids):
             try:
                 res, msg = mail.fetch(e_id, "(RFC822)")
@@ -216,3 +212,4 @@ if user_email and user_password:
         process_emails(user_email, user_password)
 else:
     st.info("👈 Please login from the sidebar to start scanning.")
+

@@ -9,25 +9,18 @@ import plotly.express as px
 # 1. পেজ কনফিগারেশন
 st.set_page_config(page_title="AI Spam Cleaner Pro", page_icon="🧹", layout="wide")
 
-# 2. সাইডবার (লগইন এবং ফোল্ডার সিলেকশন)
+# 2. সাইডবার
 with st.sidebar:
     st.title("🔐 Login Panel")
     user_email = st.text_input("Gmail Address")
     user_password = st.text_input("App Password", type="password")
-    
     st.divider()
     
-    # 🔥 ফোল্ডার সিলেক্ট করার অপশন (নতুন) 🔥
+    # সেটিংস
     st.subheader("⚙️ Scan Settings")
-    target_folder = st.selectbox(
-        "Select Folder to Clean:",
-        ["[Gmail]/Spam", "INBOX"]
-    )
+    target_folder = st.selectbox("Select Folder:", ["[Gmail]/Spam", "INBOX"])
+    email_limit = st.slider("Scan Limit:", 10, 200, 50)
     
-    # ইনবক্স বিশাল হতে পারে, তাই লিমিট সেট করার অপশন
-    email_limit = st.slider("Number of emails to scan:", min_value=10, max_value=200, value=50)
-
-    st.info("⚠️ 'INBOX' সিলেক্ট করলে আপনার মেইন মেইল স্ক্যান হবে। ডিলিট করার আগে সাবধানে চেক করবেন!")
     st.caption("Developed by Toufique Ahmed")
 
 # 3. মডেল লোড
@@ -42,86 +35,53 @@ def load_models():
 
 model, vectorizer = load_models()
 
-# 4. প্রসেসিং ফাংশন
+# 4. প্রসেসিং ফাংশন (সিম্পল ডিলিট লজিক)
 def process_emails(username, password, folder, limit):
     try:
         # কানেকশন
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(username, password)
         
-        # Trash ফোল্ডার ডিটেক্ট করা
-        trash_folder = "[Gmail]/Trash"
-        try:
-            mail.select(trash_folder)
-        except:
-            trash_folder = "[Gmail]/Bin"
-        
-        # 🔥 ইউজারের সিলেক্ট করা ফোল্ডার ওপেন করা 🔥
-        try:
-            status, response = mail.select(folder)
-            if status != 'OK':
-                st.error(f"❌ ফোল্ডার '{folder}' ওপেন করা যাচ্ছে না।")
-                return
-        except:
-            st.error("Error opening folder.")
+        # ফোল্ডার ওপেন করা
+        status, response = mail.select(folder)
+        if status != 'OK':
+            st.error(f"❌ '{folder}' ওপেন করা যাচ্ছে না।")
             return
 
-        # স্ক্যানিং (UID Search)
+        # স্ক্যানিং (UID)
         status, messages = mail.uid('search', None, "ALL")
-        
         if not messages[0]:
             st.success(f"🎉 '{folder}' ফোল্ডার একদম ফাঁকা!")
             return
 
-        # সব মেইল না নিয়ে, শেষের (Latest) কিছু মেইল নেওয়া
         all_ids = messages[0].split()
-        latest_ids = all_ids[-limit:] # স্লাইডার দিয়ে ঠিক করা লিমিট অনুযায়ী
+        latest_ids = all_ids[-limit:]
 
-        st.info(f"🔍 '{folder}' ফোল্ডারের সর্বশেষ **{len(latest_ids)}** টি মেইল স্ক্যান করা হচ্ছে...")
+        st.info(f"🔍 স্ক্যান করা হচ্ছে... ({len(latest_ids)} emails)")
         
         data_list = []
         progress_bar = st.progress(0)
         
-        # হোয়াইটলিস্ট (সেফটি)
-        whitelist_keywords = [
-            "class", "exam", "quiz", "assignment", "marks", "result", "grade", 
-            "university", "varsity", "routine", "schedule", "notice", "teacher", 
-            "professor", "lecture", "student", "portal", "fee", "admission",
-            "interview", "offer", "job", "hiring", "application", "recruit", 
-            "resume", "cv", "selection", "shortlist", "appointment", "meeting", 
-            "bank", "statement", "transaction", "payment", "bill", "invoice", 
-            "receipt", "otp", "verification", "code", "bkash", "nagad", "rocket",
-            "order", "placed", "shipped", "delivery", "courier", "password", 
-            "reset", "login", "security", "alert", "verify", "otp"
-        ]
+        # হোয়াইটলিস্ট
+        whitelist_keywords = ["class", "exam", "quiz", "result", "grade", "university", "interview", "offer", "job", "bkash", "nagad", "otp", "code", "login", "alert"]
+        whitelist_senders = [".edu", "google.com", "linkedin.com", "facebook.com", "udacity.com", "github.com", "streamlit.io"]
 
-        whitelist_senders = [
-            ".edu", ".ac.bd", ".gov", ".org", "google.com", "linkedin.com", 
-            "facebook.com", "udacity.com", "coursera.org", "medium.com", 
-            "zoom.us", "microsoft.com", "github.com", "kaggle.com", "streamlit.io"
-        ]
-
-        # লুপ (Reversed = নতুন মেইল আগে)
+        # লুপ
         for i, e_id in enumerate(reversed(latest_ids)):
             try:
                 res, msg = mail.uid('fetch', e_id, "(RFC822)")
                 for response in msg:
                     if isinstance(response, tuple):
                         msg = email.message_from_bytes(response[1])
-                        
                         subject, encoding = decode_header(msg["Subject"])[0]
                         if isinstance(subject, bytes):
                             subject = subject.decode(encoding if encoding else "utf-8")
-                        
                         sender = msg.get("From", "").lower()
                         subject_lower = subject.lower()
                         
-                        # --- লজিক ---
-                        # যদি ইনবক্স স্ক্যান করি, ডিফল্ট হবে "Safe", মডেল যদি স্প্যাম বলে তবেই "Spam"
-                        # যদি স্প্যাম ফোল্ডার স্ক্যান করি, ডিফল্ট "Spam"
-                        
+                        # লজিক
                         if folder == "INBOX":
-                             category = "Safe" # ইনবক্সে আমরা ধরে নেব সব মেইল ভালো
+                             category = "Safe"
                              reason = "Regular Mail"
                              should_check_ai = True
                         else:
@@ -130,38 +90,29 @@ def process_emails(username, password, folder, limit):
                              should_check_ai = True
 
                         is_whitelisted = False
-
-                        # ১. হোয়াইটলিস্ট চেক
                         for s in whitelist_senders:
                             if s in sender:
                                 is_whitelisted = True
                                 category = "Safe"
-                                reason = f"Trusted Sender ({s})"
+                                reason = "Trusted Sender"
                                 should_check_ai = False
                                 break
-
+                        
                         if not is_whitelisted:
                             for w in whitelist_keywords:
                                 if w in subject_lower:
                                     is_whitelisted = True
                                     category = "Safe"
-                                    reason = f"Keyword: '{w}'"
+                                    reason = f"Keyword: {w}"
                                     should_check_ai = False
                                     break
                         
-                        # ২. AI চেক (শুধুমাত্র যদি হোয়াইটলিস্টে না থাকে)
                         if should_check_ai and model:
                             try:
                                 vec = vectorizer.transform([subject])
-                                prediction = model.predict(vec)[0]
-                                
-                                if prediction == 1: # মডেল বলছে SPAM
+                                if model.predict(vec)[0] == 1:
                                     category = "Spam"
-                                    reason = "AI Model Detected Spam"
-                                elif prediction == 0 and folder == "[Gmail]/Spam":
-                                    # স্প্যাম ফোল্ডারে ছিল কিন্তু মডেল বলছে ভালো
-                                    category = "Safe"
-                                    reason = "AI Model marked as Safe"
+                                    reason = "AI Detected Spam"
                             except:
                                 pass
 
@@ -175,63 +126,56 @@ def process_emails(username, password, folder, limit):
                         })
             except:
                 continue
-            
             progress_bar.progress((i + 1) / len(latest_ids))
 
-        # --- ৩. রেজাল্ট এবং অ্যাকশন ---
+        # রেজাল্ট
         df = pd.DataFrame(data_list)
-        
         if not df.empty:
-            # Stats
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Scanned", len(df))
-            col2.metric("Safe Emails", len(df[df['Category']=='Safe']))
-            col3.metric("Spam Found", len(df[df['Category']=='Spam']), delta_color="inverse")
+            # চার্ট
+            col1, col2 = st.columns(2)
+            col1.metric("Total Emails", len(df))
+            col2.metric("Spam Found", len(df[df['Category']=='Spam']), delta_color="inverse")
             
-            # Chart
-            fig = px.pie(df, names='Category', title=f'Status of scanned emails in {folder}', 
-                         color='Category', color_discrete_map={'Safe':'#2ecc71', 'Spam':'#e74c3c'})
+            fig = px.pie(df, names='Category', title=f'{folder} Overview', color='Category', color_discrete_map={'Safe':'#2ecc71', 'Spam':'#e74c3c'})
             st.plotly_chart(fig, use_container_width=True)
 
-            st.divider()
-            
-            # Table
+            # অ্যাকশন সেন্টার
             st.subheader("🛠️ Action Center")
             edited_df = st.data_editor(
                 df[['Select', 'Category', 'Subject', 'Reason', 'Sender']],
-                column_config={
-                    "Select": st.column_config.CheckboxColumn("Delete?", default=False),
-                    "Subject": st.column_config.TextColumn("Subject", width="large"),
-                },
+                column_config={"Select": st.column_config.CheckboxColumn("Delete?", default=False)},
                 disabled=["Category", "Subject", "Reason", "Sender"],
                 hide_index=True,
                 use_container_width=True
             )
 
-            # Delete Logic
             to_delete = edited_df[edited_df['Select'] == True]
             
-            if st.button("🗑️ Delete Selected", type="primary"):
+            # 🔥🔥🔥 FORCE DELETE BUTTON 🔥🔥🔥
+            if st.button("🗑️ Delete Selected Emails"):
                 if not to_delete.empty:
-                    st.toast(f"Moving {len(to_delete)} emails to Trash...")
-                    progress_del = st.progress(0)
-                    
-                    original_uids = df.loc[to_delete.index, 'ID'].tolist()
-                    
-                    count = 0
-                    for idx, uid in enumerate(original_uids):
-                        try:
-                            mail.uid('COPY', uid, trash_folder)
-                            mail.uid('STORE', uid, '+FLAGS', '(\\Deleted)')
-                            count += 1
-                        except Exception as e:
-                            print(e)
-                        progress_del.progress((idx + 1) / len(original_uids))
-                    
-                    mail.expunge()
-                    st.balloons()
-                    st.success(f"Moved {count} emails to Trash from {folder}!")
-                    st.rerun()
+                    # স্পিনার যোগ করা যাতে ইউজার বোঝে কাজ হচ্ছে
+                    with st.spinner("Deleting emails permanently..."):
+                        
+                        original_uids = df.loc[to_delete.index, 'ID'].tolist()
+                        
+                        count = 0
+                        for uid in original_uids:
+                            try:
+                                # সরাসরি ডিলিট ফ্ল্যাগ বসানো (Trash এ কপি না করেই)
+                                mail.uid('STORE', uid, '+FLAGS', '\\Deleted')
+                                count += 1
+                            except Exception as e:
+                                st.error(f"Error deleting ID {uid}: {e}")
+                        
+                        # ধাক্কা দিয়ে বের করে দেওয়া (Expunge)
+                        mail.expunge()
+                        
+                        st.balloons()
+                        st.success(f"🚀 {count} emails deleted successfully from {folder}!")
+                        
+                        # লিস্ট রিফ্রেশ করার জন্য রিরান
+                        st.rerun()
                 else:
                     st.warning("No emails selected.")
 
@@ -240,13 +184,10 @@ def process_emails(username, password, folder, limit):
     except Exception as e:
         st.error(f"Error: {e}")
 
-# 5. Run App
+# 5. অ্যাপ রান
 st.title("🚀 AI Spam Cleaner Pro")
-
 if user_email and user_password:
-    # বাটন চাপলে প্রসেস শুরু হবে
     if st.button("🚀 Start Scan"):
-        # সাইডবারের সিলেকশন অনুযায়ী ফাংশন কল করা হচ্ছে
         process_emails(user_email, user_password, target_folder, email_limit)
 else:
-    st.info("👈 Please login from the sidebar.")
+    st.info("Please login first.")

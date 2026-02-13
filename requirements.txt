@@ -2,3 +2,5 @@ streamlit
 scikit-learn
 pandas
 plotly
+jotlib
+

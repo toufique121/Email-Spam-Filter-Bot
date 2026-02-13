@@ -2,7 +2,7 @@ import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
-import pickle
+import joblib  # pickle এর বদলে joblib ব্যবহার করা হয়েছে
 import pandas as pd
 import time
 
@@ -47,7 +47,11 @@ def is_important_email(subject, sender):
         "cgpa", "grade sheet", "varsity notice", "bkash verification", "nagad otp", 
         "security code", "password reset", "google alert", "verification code", "otp"
     ]
-    safe_senders = [".edu", ".gov", ".ac.bd", "google.com", "linkedin.com", "github.com"]
+    # আপনার প্রয়োজনীয় সাইটগুলো এখানে যুক্ত করা হয়েছে
+    safe_senders = [
+        ".edu", ".gov", ".ac.bd", "google.com", "linkedin.com", "github.com", 
+        "kaggle.com", "codeforces.com", "hackerrank.com", "streamlit.io"
+    ]
     
     sender, subject = sender.lower(), subject.lower()
     for s in safe_senders:
@@ -56,18 +60,17 @@ def is_important_email(subject, sender):
         if w in subject: return True, f"Important Keyword: {w}"
     return False, "Potential Spam"
 
-# 🔥 নতুন .pkl ফাইলের নামের সাথে আপডেট করা হয়েছে
+# 🔥 joblib ব্যবহার করে মডেল লোড (এরর হ্যান্ডলিং সহ)
 @st.cache_resource
 def load_ai_model():
     try:
-        # আপনার GitHub-এর নতুন ফাইল নামের সাথে মিল রাখা হয়েছে
-        with open('final_model.pkl', 'rb') as f:
-            model = pickle.load(f)
-        with open('final_vectorizer.pkl', 'rb') as f:
-            vectorizer = pickle.load(f)
+        # নিশ্চিত করুন গিটহাবে ফাইলের নাম এগুলোই আছে
+        model = joblib.load('final_model.pkl')
+        vectorizer = joblib.load('final_vectorizer.pkl')
         return model, vectorizer
     except Exception as e:
-        st.error(f"Error loading model: {e}")
+        # এরর হলে স্ক্রিনে দেখাবে
+        st.error(f"⚠️ মডেল লোড হতে সমস্যা হচ্ছে: {e}")
         return None, None
 
 model, vectorizer = load_ai_model()
@@ -88,19 +91,20 @@ with st.sidebar:
     if not st.session_state.logged_in:
         st.subheader("🔐 Secure Login")
         user_email = st.text_input("Email Address", placeholder="example@gmail.com")
-        user_password = st.text_input("App Password", type="password")
+        user_password = st.text_input("App Password", type="password", help="Use Google App Password.")
         
         if st.button("🚀 Login Securely"):
             if user_email and user_password:
-                conn = connect_to_gmail(user_email, user_password)
-                if conn:
-                    st.session_state.logged_in = True
-                    st.session_state.user_email = user_email
-                    st.session_state.user_password = user_password
-                    conn.logout()
-                    st.rerun()
-                else:
-                    st.error("Login Failed! Use App Password.")
+                with st.spinner("Checking connection..."):
+                    conn = connect_to_gmail(user_email, user_password)
+                    if conn:
+                        st.session_state.logged_in = True
+                        st.session_state.user_email = user_email
+                        st.session_state.user_password = user_password
+                        conn.logout()
+                        st.rerun()
+                    else:
+                        st.error("Login Failed! Check Email or App Password.")
     else:
         st.success(f"👤 Logged in:\n{st.session_state.user_email}")
         folder = st.selectbox("🎯 Target Folder", ["INBOX", "[Gmail]/Spam"])
@@ -111,6 +115,7 @@ with st.sidebar:
             st.rerun()
         if st.button("🚪 Logout"):
             st.session_state.logged_in = False
+            st.session_state.emails_df = pd.DataFrame()
             st.rerun()
 
 # --- ৫. ড্যাশবোর্ড ---
@@ -130,34 +135,36 @@ if st.session_state.logged_in:
                     my_bar = st.progress(0)
                     
                     for i, uid in enumerate(reversed(uids)):
-                        _, msg_data = mail.uid('fetch', uid, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
-                        msg = email.message_from_bytes(msg_data[0][1])
-                        
-                        subject = "No Subject"
-                        if msg["Subject"]:
-                            decoded = decode_header(msg["Subject"])[0]
-                            subject = decoded[0].decode(decoded[1] or "utf-8") if isinstance(decoded[0], bytes) else str(decoded[0])
-                        
-                        sender = msg.get("From", "")
-                        is_safe, rule_reason = is_important_email(subject, sender)
-                        
-                        # AI মডেল প্রেডিকশন
-                        category, reason = "Spam", "AI Detected Spam"
-                        if is_safe:
-                            category, reason = "Safe", rule_reason
-                        elif model and vectorizer:
-                            vec = vectorizer.transform([subject])
-                            if model.predict(vec)[0] == 0:
-                                category, reason = "Safe", "AI Model Cleared"
-                        
-                        data.append({
-                            "UID": uid.decode('utf-8'),
-                            "Subject": subject,
-                            "Sender": sender,
-                            "Category": category,
-                            "Reason": reason,
-                            "Delete": True if category == "Spam" else False
-                        })
+                        try:
+                            _, msg_data = mail.uid('fetch', uid, '(BODY.PEEK[HEADER.FIELDS (SUBJECT FROM)])')
+                            msg = email.message_from_bytes(msg_data[0][1])
+                            
+                            subject = "No Subject"
+                            if msg["Subject"]:
+                                decoded = decode_header(msg["Subject"])[0]
+                                subject = decoded[0].decode(decoded[1] or "utf-8") if isinstance(decoded[0], bytes) else str(decoded[0])
+                            
+                            sender = msg.get("From", "")
+                            is_safe, rule_reason = is_important_email(subject, sender)
+                            
+                            category, reason = "Spam", "AI Detected Spam"
+                            if is_safe:
+                                category, reason = "Safe", rule_reason
+                            elif model and vectorizer:
+                                vec = vectorizer.transform([subject])
+                                if model.predict(vec)[0] == 0:  # 0 = Ham, 1 = Spam
+                                    category, reason = "Safe", "AI Model Cleared"
+                            
+                            data.append({
+                                "UID": uid.decode('utf-8'),
+                                "Subject": subject,
+                                "Sender": sender,
+                                "Category": category,
+                                "Reason": reason,
+                                "Delete": True if category == "Spam" else False
+                            })
+                        except:
+                            continue
                         my_bar.progress((i + 1) / len(uids))
                     
                     st.session_state.emails_df = pd.DataFrame(data)
@@ -172,11 +179,11 @@ if st.session_state.logged_in:
         c2.metric("🛡️ Safe", len(df[df['Category']=='Safe']))
         c3.metric("🚨 Spam", len(df[df['Category']=='Spam']))
         
-        edited_df = st.data_editor(df, use_container_width=True, hide_index=True)
+        st.divider()
+        st.data_editor(df, use_container_width=True, hide_index=True)
         
-        # ডিলিট লজিক (সংক্ষেপে)
-        if st.button("🗑️ Delete Selected"):
-            st.warning("Feature: Requires IMAP write access to permanently delete.")
+        if st.button("🗑️ Delete Selected (Feature Demo)"):
+            st.warning("নিরাপত্তার স্বার্থে সরাসরি ডিলিট করার ফাংশনটি এখানে সীমাবদ্ধ রাখা হয়েছে।")
 
 else:
     st.info("👈 Please login from the sidebar using your Gmail App Password.")

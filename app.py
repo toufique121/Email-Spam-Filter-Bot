@@ -26,7 +26,21 @@ if 'logged_in' not in st.session_state:
 if 'current_folder' not in st.session_state:
     st.session_state.current_folder = "INBOX"
 
-# --- ৩. এআই ও কানেকশন লজিক ---
+# --- ৩. প্রোটেকশন লজিক (ভুল ডিটেকশন বন্ধ করার জন্য) ---
+def smart_whitelist(subject, sender):
+    """গুরুত্বপূর্ণ মেইলকে স্প্যাম হওয়া থেকে রক্ষা করার লেয়ার"""
+    # বিশ্বস্ত ডোমেইন এবং কি-ওয়ার্ড
+    safe_domains = ["google.com", "linkedin.com", "github.com", "hackerrank.com", "udemy.com", "coursera.org", ".edu", ".gov"]
+    safe_words = ["security", "alert", "cloud", "action advised", "verification", "otp", "interview", "exam"]
+    
+    sender, subject = sender.lower(), subject.lower()
+    
+    for domain in safe_domains:
+        if domain in sender: return True
+    for word in safe_words:
+        if word in subject: return True
+    return False
+
 @st.cache_resource
 def load_ai():
     try:
@@ -42,7 +56,7 @@ def connect_gmail(u, p):
         return m
     except: return None
 
-# --- ৪. সাইডবার গাইডলাইন (App Standards) ---
+# --- ৪. সাইডবার ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/281/281769.png", width=80)
     if not st.session_state.logged_in:
@@ -64,7 +78,7 @@ with st.sidebar:
             st.session_state.logged_in = False
             st.rerun()
 
-# --- ৫. প্রোফেশনাল ড্যাশবোর্ড ---
+# --- ৫. প্রফেশনাল ড্যাশবোর্ড ---
 st.markdown('<div class="main-title">🛡️ SpamGuard Pro AI</div>', unsafe_allow_html=True)
 
 if st.session_state.logged_in:
@@ -84,11 +98,16 @@ if st.session_state.logged_in:
                             subj = str(decode_header(msg.get("Subject", "No Subject"))[0][0])
                             sndr = msg.get("From", "")
                             
+                            # ১. প্রথমে স্মার্ট হোয়াইটলিস্ট চেক করা
+                            is_safe_by_rule = smart_whitelist(subj, sndr)
+                            
                             status, action_bool = "🟢 Safe", False
-                            if model:
+                            
+                            # ২. যদি রুল অনুযায়ী সেফ না হয়, তবেই এআই মডেল ব্যবহার করা
+                            if not is_safe_by_rule and model:
                                 prob = model.predict_proba(vectorizer.transform([subj]))[0][1]
-                                if prob > 0.45: 
-                                    status, action_bool = "🔴 Spam", True # স্প্যাম হলে অটো টিক
+                                if prob > 0.45: # থ্রেশহোল্ড ৪ %
+                                    status, action_bool = "🔴 Spam", True
                             
                             data.append({"UID": uid.decode(), "Subject": subj, "Sender": sndr, "Verdict": status, "Action": action_bool})
                         except: continue
@@ -103,11 +122,9 @@ if st.session_state.logged_in:
         c2.metric("Safe", len(df[df['Verdict']=='🟢 Safe']))
         c3.metric("Spam", len(df[df['Verdict']=='🔴 Spam']))
 
-        # স্মার্ট টেবিল যেখানে স্প্যামগুলো আগে থেকেই সিলেক্ট করা থাকবে
         edited_df = st.data_editor(df, column_config={"UID": None, "Action": st.column_config.CheckboxColumn("Select", default=False)}, hide_index=True, use_container_width=True)
         to_move = edited_df[edited_df['Action'] == True]
 
-        # এক ক্লিকে কাজ করার ইঞ্জিন
         col_btn1, col_btn2 = st.columns(2)
         label = "📥 Back to Inbox" if st.session_state.current_folder == "[Gmail]/Spam" else "🚀 Move All Spam"
         
@@ -120,9 +137,9 @@ if st.session_state.logged_in:
                     for uid in to_move['UID'].tolist():
                         mail.uid('COPY', uid.encode(), f'"{dest}"')
                         mail.uid('STORE', uid.encode(), '+FLAGS', '\\Deleted')
-                    mail.expunge() # সার্ভার সিনক্রোনাইজেশন
+                    mail.expunge()
                     mail.logout()
-                    st.balloons() # সাকসেস অ্যানিমেশন
+                    st.balloons()
                     st.success(f"✨ Successfully moved {len(to_move)} items!")
                     time.sleep(1)
                     st.session_state.emails_df = pd.DataFrame()
@@ -140,6 +157,5 @@ if st.session_state.logged_in:
                 st.success("Spam folder is now empty!")
                 st.session_state.emails_df = pd.DataFrame()
                 st.rerun()
-
 else:
     st.info("👋 Welcome! Use a Google App Password to keep your inbox clean and secure.")

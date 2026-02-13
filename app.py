@@ -2,34 +2,53 @@ import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
-import joblib  # মডেল লোড করার জন্য pickle এর চেয়ে বেশি নির্ভরযোগ্য
+import joblib
 import pandas as pd
 import time
 
-# --- ১. পেজ কনফিগারেশন ---
+# --- ১. পেজ কনফিগারেশন ও প্রিমিয়াম থিম ---
 st.set_page_config(
-    page_title="SpamGuard AI",
+    page_title="SpamGuard AI - Shield Your Inbox",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# কাস্টম CSS (UI সুন্দর করার জন্য)
+# কাস্টম CSS (ডিজাইন আকর্ষণীয় করার জন্য)
 st.markdown("""
 <style>
+    /* মেইন টাইটেল স্টাইল */
+    .main-title {
+        font-size: 40px;
+        font-weight: 800;
+        color: #1a73e8;
+        text-align: center;
+        margin-bottom: 30px;
+    }
+    /* বাটন স্টাইল */
     .stButton>button {
         width: 100%;
-        border-radius: 8px;
-        height: 3em;
+        border-radius: 20px;
+        border: none;
+        transition: 0.3s;
         font-weight: bold;
     }
-    div[data-testid="stMetric"] {
-        background-color: #f8f9fa;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #e9ecef;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    .stButton>button:hover {
+        background-color: #1a73e8;
+        color: white;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
     }
+    /* মেট্রিক বক্স স্টাইল */
+    div[data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        border: 1px solid #f1f3f4;
+    }
+    /* স্ট্যাটাস ব্যাজ */
+    .status-safe { color: #1e8e3e; font-weight: bold; background-color: #e6f4ea; padding: 2px 8px; border-radius: 10px; }
+    .status-spam { color: #d93025; font-weight: bold; background-color: #fce8e6; padding: 2px 8px; border-radius: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,43 +61,38 @@ if 'logged_in' not in st.session_state:
 # --- ৩. হেল্পার ফাংশন ---
 
 def is_important_email(subject, sender):
-    """ম্যানুয়াল রুলস ব্যবহার করে গুরুত্বপূর্ণ মেইল আলাদা করা"""
+    """ম্যানুয়াল রুলস ব্যবহার করে নিরাপদ মেইল আলাদা করা"""
     safe_keywords = [
-        "interview schedule", "appointment letter", "class test", "midterm", "final exam", 
-        "cgpa", "grade sheet", "varsity notice", "bkash verification", "nagad otp", 
-        "security code", "password reset", "google alert", "verification code", "otp"
+        "interview", "appointment", "class test", "midterm", "final exam", 
+        "cgpa", "grade", "notice", "bkash", "nagad", "otp", "verification", "security"
     ]
-    # আপনার প্রয়োজনীয় ডোমেইনগুলো এখানে আপডেট করা হয়েছে
     safe_senders = [
         ".edu", ".gov", ".ac.bd", "google.com", "linkedin.com", "github.com", 
-        "kaggle.com", "codeforces.com", "hackerrank.com", "streamlit.io",
-        "upwork.com", "fiverr.com", "coursera.org", "udacity.com"
+        "kaggle.com", "codeforces.com", "hackerrank.com", "streamlit.io", "upwork.com"
     ]
     
     sender, subject = sender.lower(), subject.lower()
     for s in safe_senders:
-        if s in sender: return True, f"Trusted Sender ({s})"
+        if s in sender: return True, f"Trusted: {s}"
     for w in safe_keywords:
-        if w in subject: return True, f"Important Keyword: {w}"
-    return False, "Potential Spam"
+        if w in subject: return True, f"Keyword: {w}"
+    return False, "AI Analysis Required"
 
 @st.cache_resource
 def load_ai_model():
-    """joblib ব্যবহার করে AI মডেল ও ভেক্টরাইজার লোড করা"""
+    """AI মডেল ও ভেক্টরাইজার লোড করা"""
     try:
-        # গিটহাবে ফাইলের নাম 'final_model.pkl' এবং 'final_vectorizer.pkl' হতে হবে
         model = joblib.load('final_model.pkl')
         vectorizer = joblib.load('final_vectorizer.pkl')
         return model, vectorizer
     except Exception as e:
-        # লোড এরর হলে স্ক্রিনে দেখাবে
-        st.error(f"Error loading model: {e}")
+        st.error(f"❌ Model Error: {e}")
         return None, None
 
 model, vectorizer = load_ai_model()
 
 def connect_to_gmail(user, pwd):
-    """জিমেইল সার্ভারের সাথে কানেক্ট করা"""
+    """জিমেইল কানেকশন"""
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(user, pwd)
@@ -86,19 +100,30 @@ def connect_to_gmail(user, pwd):
     except:
         return None
 
-# --- ৪. সাইডবার (Login & Settings) ---
+# --- ৪. সাইডবার (Login & Instructions) ---
 with st.sidebar:
-    st.title("🛡️ SpamGuard AI")
+    st.image("https://cdn-icons-png.flaticon.com/512/281/281769.png", width=80)
+    st.title("SpamGuard AI")
     st.markdown("---")
     
     if not st.session_state.logged_in:
         st.subheader("🔐 Secure Login")
-        user_email = st.text_input("Email Address", placeholder="example@gmail.com")
-        user_password = st.text_input("App Password", type="password", help="Use Google App Password.")
+        user_email = st.text_input("Gmail Address", placeholder="yourname@gmail.com")
+        user_password = st.text_input("App Password", type="password", help="Enter 16-digit App Password")
         
-        if st.button("🚀 Login Securely"):
+        # 🔥 App Password Instruction
+        with st.expander("❓ How to get App Password?"):
+            st.markdown("""
+            1. Go to **Google Account Settings**.
+            2. Enable **2-Step Verification**.
+            3. Search for **'App Passwords'**.
+            4. Choose **'Other'**, name it 'SpamGuard'.
+            5. Copy the **16-digit code** and paste here.
+            """)
+        
+        if st.button("🚀 Access Inbox"):
             if user_email and user_password:
-                with st.spinner("Authenticating..."):
+                with st.spinner("Connecting securely..."):
                     conn = connect_to_gmail(user_email, user_password)
                     if conn:
                         st.session_state.logged_in = True
@@ -107,26 +132,24 @@ with st.sidebar:
                         conn.logout()
                         st.rerun()
                     else:
-                        st.error("Login Failed! Check Email or App Password.")
+                        st.error("❌ Login Failed! Use 'App Password' only.")
     else:
-        st.success(f"👤 Logged in:\n{st.session_state.user_email}")
-        folder = st.selectbox("🎯 Target Folder", ["INBOX", "[Gmail]/Spam"])
-        limit = st.slider("📊 Scan Depth (Emails)", 10, 200, 50)
+        st.success(f"👤 Account: \n{st.session_state.user_email}")
+        folder = st.selectbox("📂 Scan Folder", ["INBOX", "[Gmail]/Spam"])
+        limit = st.slider("📊 Emails to Scan", 10, 200, 50)
         
-        if st.button("🔄 Rescan"):
-            st.session_state.emails_df = pd.DataFrame()
-            st.rerun()
+        st.markdown("---")
         if st.button("🚪 Logout"):
             st.session_state.logged_in = False
             st.session_state.emails_df = pd.DataFrame()
             st.rerun()
 
-# --- ৫. ড্যাশবোর্ড ও এআই এনালাইসিস ---
+# --- ৫. মেইন ড্যাশবোর্ড ---
+st.markdown('<div class="main-title">🛡️ SpamGuard AI Engine</div>', unsafe_allow_html=True)
+
 if st.session_state.logged_in:
-    st.header(f"📂 Scanning: {folder}")
-    
     if st.session_state.emails_df.empty:
-        with st.spinner("🔍 AI Engine is analyzing your emails..."):
+        with st.spinner("🧠 AI is analyzing patterns..."):
             mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
             if mail:
                 mail.select(folder)
@@ -150,73 +173,69 @@ if st.session_state.logged_in:
                             sender = msg.get("From", "")
                             is_safe, rule_reason = is_important_email(subject, sender)
                             
-                            category, reason = "Spam", "AI Detected Spam"
+                            category, reason, status_ui = "Spam", "AI Detected Spam", "🔴 Spam"
+                            
                             if is_safe:
-                                category, reason = "Safe", rule_reason
+                                category, reason, status_ui = "Safe", rule_reason, "🟢 Safe"
                             elif model and vectorizer:
                                 vec = vectorizer.transform([subject])
-                                if model.predict(vec)[0] == 0:  # 0 = Ham, 1 = Spam
-                                    category, reason = "Safe", "AI Model Cleared"
+                                # থ্রেশহোল্ড চেক করে কড়া ফিল্টারিং
+                                probs = model.predict_proba(vec)[0]
+                                if probs[1] < 0.35: # Spam probability < 35%
+                                    category, reason, status_ui = "Safe", "AI Model Cleared", "🟢 Safe"
                             
                             data.append({
                                 "UID": uid.decode('utf-8'),
                                 "Subject": subject,
                                 "Sender": sender,
-                                "Category": category,
+                                "Status": status_ui,
                                 "Reason": reason,
-                                "Delete": True if category == "Spam" else False
+                                "Select": True if category == "Spam" else False
                             })
-                        except:
-                            continue
+                        except: continue
                         my_bar.progress((i + 1) / len(uids))
                     
                     st.session_state.emails_df = pd.DataFrame(data)
                     mail.logout()
                     st.rerun()
 
-    # রেজাল্ট ডিসপ্লে টেবিল
+    # ডাটা ভিজুয়ালাইজেশন
     if not st.session_state.emails_df.empty:
         df = st.session_state.emails_df
         c1, c2, c3 = st.columns(3)
-        c1.metric("📬 Scanned", len(df))
-        c2.metric("🛡️ Safe Emails", len(df[df['Category']=='Safe']), delta="Keep")
-        c3.metric("🚨 Spam Detected", len(df[df['Category']=='Spam']), delta="-Delete", delta_color="inverse")
+        c1.metric("📬 Total Scanned", len(df))
+        c2.metric("✅ Safe & Sound", len(df[df['Status']=='🟢 Safe']))
+        c3.metric("🚨 Spam Blocked", len(df[df['Status']=='🔴 Spam']))
         
-        st.divider()
-        st.subheader("🧹 Action Required")
+        st.markdown("### 🔍 Security Report")
         
-        # ডাটা এডিটর ব্যবহার করে ইউজারকে ডিলিট করার সুযোগ দেওয়া
+        # এডিটর টেবিল
         edited_df = st.data_editor(
             df,
             column_config={
                 "UID": None, 
-                "Delete": st.column_config.CheckboxColumn("Select to Delete", default=False),
-                "Category": st.column_config.TextColumn("Status", width="small"),
+                "Select": st.column_config.CheckboxColumn("🗑️ Delete?", default=False),
+                "Status": st.column_config.TextColumn("Verdict"),
+                "Subject": st.column_config.TextColumn("Email Subject", width="large"),
+                "Reason": st.column_config.TextColumn("Why?"),
             },
-            disabled=["Category", "Subject", "Sender", "Reason", "UID"],
+            disabled=["Status", "Subject", "Sender", "Reason", "UID"],
             hide_index=True,
             use_container_width=True
         )
         
-        # আসল ডিলিট লজিক
-        to_delete = edited_df[edited_df['Delete'] == True]
-        count = len(to_delete)
-        
-        if st.button(f"🗑️ Delete {count} Selected Emails", type="primary", disabled=(count==0)):
-            with st.spinner("Deleting from Gmail..."):
+        # ডিলিট অ্যাকশন
+        to_delete = edited_df[edited_df['Select'] == True]
+        if st.button(f"🧹 Clean Up {len(to_delete)} Selected Emails", type="primary"):
+            with st.spinner("Deleting permanently..."):
                 try:
                     mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
                     mail.select(folder)
-                    
-                    uids_to_del = to_delete['UID'].tolist()
-                    for uid in uids_to_del:
-                        # মেইলগুলোকে জিমেইলের ডিলিট ফ্ল্যাগে পাঠানো
+                    for uid in to_delete['UID'].tolist():
                         mail.uid('STORE', uid.encode('utf-8'), '+FLAGS', '\\Deleted')
-                    
-                    mail.expunge() # ডিলিট নিশ্চিত করা
+                    mail.expunge()
                     mail.logout()
-                    
-                    st.toast(f"Success! {count} emails removed.", icon="✅")
+                    st.toast("Inbox Cleaned Successfully! ✨")
                     time.sleep(1)
                     st.session_state.emails_df = pd.DataFrame()
                     st.rerun()
@@ -224,4 +243,12 @@ if st.session_state.logged_in:
                     st.error(f"Error: {e}")
 
 else:
-    st.info("👈 Please login from the sidebar using your Gmail App Password to start scanning.")
+    # লগইন না থাকলে সুন্দর একটি ওয়েলকাম মেসেজ
+    st.info("👋 Welcome! Please login from the sidebar using your **Gmail App Password** to protect your inbox.")
+    st.markdown("""
+    ### কেন 'App Password' প্রয়োজন? 
+    আপনার মূল জিমেইল পাসওয়ার্ড দিয়ে লগইন করা আপনার অ্যাকাউন্টের জন্য অনিরাপদ। 
+    **Google App Password** ব্যবহার করলে আপনার অ্যাকাউন্ট ১০০% নিরাপদ থাকে এবং আপনার এই 
+    SpamGuard AI অ্যাপটি আপনার হয়ে ইনবক্স পরিষ্কার করার অনুমতি পায়।
+    """)
+    st.image("https://www.gstatic.com/images/branding/product/2x/gmail_64dp.png", width=50)

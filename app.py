@@ -2,7 +2,7 @@ import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
-import joblib  # pickle এর বদলে joblib ব্যবহার করা হয়েছে
+import joblib  # মডেল লোড করার জন্য pickle এর চেয়ে বেশি নির্ভরযোগ্য
 import pandas as pd
 import time
 
@@ -14,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# কাস্টম CSS
+# কাস্টম CSS (UI সুন্দর করার জন্য)
 st.markdown("""
 <style>
     .stButton>button {
@@ -42,15 +42,17 @@ if 'logged_in' not in st.session_state:
 # --- ৩. হেল্পার ফাংশন ---
 
 def is_important_email(subject, sender):
+    """ম্যানুয়াল রুলস ব্যবহার করে গুরুত্বপূর্ণ মেইল আলাদা করা"""
     safe_keywords = [
         "interview schedule", "appointment letter", "class test", "midterm", "final exam", 
         "cgpa", "grade sheet", "varsity notice", "bkash verification", "nagad otp", 
         "security code", "password reset", "google alert", "verification code", "otp"
     ]
-    # আপনার প্রয়োজনীয় সাইটগুলো এখানে যুক্ত করা হয়েছে
+    # আপনার প্রয়োজনীয় ডোমেইনগুলো এখানে আপডেট করা হয়েছে
     safe_senders = [
         ".edu", ".gov", ".ac.bd", "google.com", "linkedin.com", "github.com", 
-        "kaggle.com", "codeforces.com", "hackerrank.com", "streamlit.io"
+        "kaggle.com", "codeforces.com", "hackerrank.com", "streamlit.io",
+        "upwork.com", "fiverr.com", "coursera.org", "udacity.com"
     ]
     
     sender, subject = sender.lower(), subject.lower()
@@ -60,22 +62,22 @@ def is_important_email(subject, sender):
         if w in subject: return True, f"Important Keyword: {w}"
     return False, "Potential Spam"
 
-# 🔥 joblib ব্যবহার করে মডেল লোড (এরর হ্যান্ডলিং সহ)
 @st.cache_resource
 def load_ai_model():
+    """joblib ব্যবহার করে AI মডেল ও ভেক্টরাইজার লোড করা"""
     try:
-        # নিশ্চিত করুন গিটহাবে ফাইলের নাম এগুলোই আছে
+        # নিশ্চিত করুন আপনার GitHub-এ ফাইলের নাম 'final_model.pkl' এবং 'final_vectorizer.pkl'
         model = joblib.load('final_model.pkl')
         vectorizer = joblib.load('final_vectorizer.pkl')
         return model, vectorizer
     except Exception as e:
-        # এরর হলে স্ক্রিনে দেখাবে
-        st.error(f"⚠️ মডেল লোড হতে সমস্যা হচ্ছে: {e}")
+        st.error(f"Error loading model: {e}")
         return None, None
 
 model, vectorizer = load_ai_model()
 
 def connect_to_gmail(user, pwd):
+    """জিমেইল সার্ভারের সাথে কানেক্ট করা"""
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(user, pwd)
@@ -83,7 +85,7 @@ def connect_to_gmail(user, pwd):
     except:
         return None
 
-# --- ৪. সাইডবার ---
+# --- ৪. সাইডবার (Login & Settings) ---
 with st.sidebar:
     st.title("🛡️ SpamGuard AI")
     st.markdown("---")
@@ -95,7 +97,7 @@ with st.sidebar:
         
         if st.button("🚀 Login Securely"):
             if user_email and user_password:
-                with st.spinner("Checking connection..."):
+                with st.spinner("Authenticating..."):
                     conn = connect_to_gmail(user_email, user_password)
                     if conn:
                         st.session_state.logged_in = True
@@ -108,7 +110,7 @@ with st.sidebar:
     else:
         st.success(f"👤 Logged in:\n{st.session_state.user_email}")
         folder = st.selectbox("🎯 Target Folder", ["INBOX", "[Gmail]/Spam"])
-        limit = st.slider("📊 Scan Depth", 10, 100, 50)
+        limit = st.slider("📊 Scan Depth (Emails)", 10, 200, 50)
         
         if st.button("🔄 Rescan"):
             st.session_state.emails_df = pd.DataFrame()
@@ -118,7 +120,7 @@ with st.sidebar:
             st.session_state.emails_df = pd.DataFrame()
             st.rerun()
 
-# --- ৫. ড্যাশবোর্ড ---
+# --- ৫. ড্যাশবোর্ড ও এআই এনালাইসিস ---
 if st.session_state.logged_in:
     st.header(f"📂 Scanning: {folder}")
     
@@ -171,19 +173,54 @@ if st.session_state.logged_in:
                     mail.logout()
                     st.rerun()
 
-    # ডিসপ্লে টেবিল
+    # রেজাল্ট ডিসপ্লে টেবিল
     if not st.session_state.emails_df.empty:
         df = st.session_state.emails_df
         c1, c2, c3 = st.columns(3)
         c1.metric("📬 Scanned", len(df))
-        c2.metric("🛡️ Safe", len(df[df['Category']=='Safe']))
-        c3.metric("🚨 Spam", len(df[df['Category']=='Spam']))
+        c2.metric("🛡️ Safe Emails", len(df[df['Category']=='Safe']), delta="Keep")
+        c3.metric("🚨 Spam Detected", len(df[df['Category']=='Spam']), delta="-Delete", delta_color="inverse")
         
         st.divider()
-        st.data_editor(df, use_container_width=True, hide_index=True)
+        st.subheader("🧹 Action Required")
         
-        if st.button("🗑️ Delete Selected (Feature Demo)"):
-            st.warning("নিরাপত্তার স্বার্থে সরাসরি ডিলিট করার ফাংশনটি এখানে সীমাবদ্ধ রাখা হয়েছে।")
+        # ডাটা এডিটর ব্যবহার করে ইউজারকে ডিলিট করার সুযোগ দেওয়া
+        edited_df = st.data_editor(
+            df,
+            column_config={
+                "UID": None, 
+                "Delete": st.column_config.CheckboxColumn("Select to Delete", default=False),
+                "Category": st.column_config.TextColumn("Status", width="small"),
+            },
+            disabled=["Category", "Subject", "Sender", "Reason", "UID"],
+            hide_index=True,
+            use_container_width=True
+        )
+        
+        # আসল ডিলিট লজিক
+        to_delete = edited_df[edited_df['Delete'] == True]
+        count = len(to_delete)
+        
+        if st.button(f"🗑️ Delete {count} Selected Emails", type="primary", disabled=(count==0)):
+            with st.spinner("Deleting from Gmail..."):
+                try:
+                    mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
+                    mail.select(folder)
+                    
+                    uids_to_del = to_delete['UID'].tolist()
+                    for uid in uids_to_del:
+                        # মেইলগুলোকে জিমেইলের ট্র্যাশ বা ডিলিট ফ্ল্যাগে পাঠানো
+                        mail.uid('STORE', uid.encode('utf-8'), '+FLAGS', '\\Deleted')
+                    
+                    mail.expunge()
+                    mail.logout()
+                    
+                    st.toast(f"Success! {count} emails removed.", icon="✅")
+                    time.sleep(1)
+                    st.session_state.emails_df = pd.DataFrame()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
 
 else:
-    st.info("👈 Please login from the sidebar using your Gmail App Password.")
+    st.info("👈 Please login from the sidebar using your Gmail App Password to start scanning.")

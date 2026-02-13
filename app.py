@@ -1,4 +1,4 @@
- import streamlit as st
+import streamlit as st
 import imaplib
 import email
 from email.header import decode_header
@@ -35,7 +35,7 @@ if 'current_folder' not in st.session_state:
 # --- ৩. স্মার্ট ফিল্টার ফাংশন ---
 def is_important_email(subject, sender):
     """ভালো মেইল রক্ষা করার লেয়ার"""
-    safe_keywords = ["interview", "exam", "otp", "verification", "university", "bkash", "nagad", "offer", "coding"]
+    safe_keywords = ["interview", "exam", "otp", "verification", "university", "bkash", "nagad", "coding"]
     safe_senders = [".edu", ".gov", ".ac.bd", "google.com", "linkedin.com", "github.com", "kaggle.com", "hackerrank.com"]
     
     sender, subject = sender.lower(), subject.lower()
@@ -47,7 +47,7 @@ def is_important_email(subject, sender):
 
 @st.cache_resource
 def load_ai_model():
-    """AI মডেল লোড"""
+    """AI মডেল লোড করা"""
     try:
         model = joblib.load('final_model.pkl')
         vectorizer = joblib.load('final_vectorizer.pkl')
@@ -64,7 +64,7 @@ def connect_to_gmail(user, pwd):
         return mail
     except: return None
 
-# --- ৪. সাইডবার (Login & Folder Selection) ---
+# --- ৪. সাইডবার (Login & Selection) ---
 with st.sidebar:
     st.image("https://cdn-icons-png.flaticon.com/512/281/281769.png", width=70)
     st.title("SpamGuard Pro AI")
@@ -72,12 +72,16 @@ with st.sidebar:
     if not st.session_state.logged_in:
         user_email = st.text_input("Gmail Address")
         user_password = st.text_input("App Password", type="password")
+        
+        with st.expander("❓ How to get App Password?"):
+            st.markdown("Google Account > 2-Step Verification > App Passwords.")
+            
         if st.button("🚀 Connect Inbox"):
             if connect_to_gmail(user_email, user_password):
                 st.session_state.logged_in = True
                 st.session_state.user_email, st.session_state.user_password = user_email, user_password
                 st.rerun()
-            else: st.error("❌ Login Failed! Use 'App Password'.")
+            else: st.error("❌ Login Failed!")
     else:
         st.success(f"👤 {st.session_state.user_email}")
         new_folder = st.selectbox("📂 Select Folder", ["INBOX", "[Gmail]/Spam"])
@@ -95,7 +99,7 @@ st.markdown('<div class="main-title">🛡️ AI-Powered Spam Organizer</div>', u
 
 if st.session_state.logged_in:
     if st.session_state.emails_df.empty:
-        with st.spinner(f"🔍 Scanning {st.session_state.current_folder}..."):
+        with st.spinner(f"🔍 Analyzing {st.session_state.current_folder}..."):
             mail = connect_to_gmail(st.session_state.user_email, st.session_state.user_password)
             if mail:
                 mail.select(st.session_state.current_folder)
@@ -109,6 +113,7 @@ if st.session_state.logged_in:
                             msg = email.message_from_bytes(msg_data[0][1])
                             subject = str(decode_header(msg.get("Subject", "No Subject"))[0][0])
                             sender = msg.get("From", "")
+                            
                             is_safe, rule_reason = is_important_email(subject, sender)
                             status_ui, category = "🔴 Spam", "Spam"
                             
@@ -130,7 +135,7 @@ if st.session_state.logged_in:
         c2.metric("✅ Safe", len(df[df['Verdict']=='🟢 Safe']))
         c3.metric("🚨 Spam", len(df[df['Verdict']=='🔴 Spam']))
 
-        # ফোল্ডার অনুযায়ী চেক বক্সের নাম পরিবর্তন
+        # ফোল্ডার অনুযায়ী লেবেল পরিবর্তন
         col_label = "📥 Move to Inbox" if st.session_state.current_folder == "[Gmail]/Spam" else "🚨 Move to Spam"
         
         st.subheader("📋 Analysis Report")
@@ -138,7 +143,7 @@ if st.session_state.logged_in:
 
         to_action = edited_df[edited_df['Select'] == True]
         
-        # --- ৬. স্মার্ট মুভ ইঞ্জিন (Inbox Recovery) ---
+        # --- ৬. স্মার্ট মুভ ইঞ্জিন (Recovery) ---
         if st.button(f"⚡ Execute Action for {len(to_action)} Emails", type="primary", disabled=len(to_action)==0):
             with st.spinner("Processing..."):
                 try:
@@ -148,14 +153,12 @@ if st.session_state.logged_in:
                     
                     mail.select(source)
                     for uid in to_action['UID'].tolist():
-                        # ১. গন্তব্য ফোল্ডারে কপি করা
                         mail.uid('COPY', uid.encode(), dest)
-                        # ২. বর্তমান ফোল্ডার থেকে ডিলিট করা
                         mail.uid('STORE', uid.encode(), '+FLAGS', '\\Deleted')
                     
-                    mail.expunge() # পরিবর্তন কার্যকর করা
+                    mail.expunge() # সেটিংস ছাড়াই কার্যকর করার কমান্ড
                     mail.logout()
-                    st.success(f"✨ Successfully moved {len(to_action)} emails to {dest}!")
+                    st.success(f"✨ Moved {len(to_action)} emails to {dest}!")
                     time.sleep(1)
                     st.session_state.emails_df = pd.DataFrame()
                     st.rerun()

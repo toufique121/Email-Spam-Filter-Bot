@@ -66,11 +66,12 @@ def is_important_email(subject, sender):
 def load_ai_model():
     """joblib ব্যবহার করে AI মডেল ও ভেক্টরাইজার লোড করা"""
     try:
-        # নিশ্চিত করুন আপনার GitHub-এ ফাইলের নাম 'final_model.pkl' এবং 'final_vectorizer.pkl'
+        # গিটহাবে ফাইলের নাম 'final_model.pkl' এবং 'final_vectorizer.pkl' হতে হবে
         model = joblib.load('final_model.pkl')
         vectorizer = joblib.load('final_vectorizer.pkl')
         return model, vectorizer
     except Exception as e:
+        # লোড এরর হলে স্ক্রিনে দেখাবে
         st.error(f"Error loading model: {e}")
         return None, None
 
@@ -209,10 +210,10 @@ if st.session_state.logged_in:
                     
                     uids_to_del = to_delete['UID'].tolist()
                     for uid in uids_to_del:
-                        # মেইলগুলোকে জিমেইলের ট্র্যাশ বা ডিলিট ফ্ল্যাগে পাঠানো
+                        # মেইলগুলোকে জিমেইলের ডিলিট ফ্ল্যাগে পাঠানো
                         mail.uid('STORE', uid.encode('utf-8'), '+FLAGS', '\\Deleted')
                     
-                    mail.expunge()
+                    mail.expunge() # ডিলিট নিশ্চিত করা
                     mail.logout()
                     
                     st.toast(f"Success! {count} emails removed.", icon="✅")
